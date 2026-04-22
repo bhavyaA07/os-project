@@ -1,187 +1,149 @@
 # algorithms/schedulers.py
 
-import copy
-from typing import List, Dict
+from __future__ import annotations
+
+from typing import Dict, List
+import pandas as pd
 
 
-# ------------------------------------------------------------------
-# Helper
-# ------------------------------------------------------------------
-
-def _deep_copy_processes(processes: List[Dict]) -> List[Dict]:
-    """Return a deep copy so original input is never mutated."""
-    return copy.deepcopy(processes)
+Process = Dict[str, int]
 
 
-# ------------------------------------------------------------------
-# 1. FCFS — First Come First Served (non-preemptive)
-# ------------------------------------------------------------------
-
-def fcfs(processes: List[Dict]) -> Dict:
-    """
-    First Come First Served scheduling.
-    Processes are executed in order of arrival_time.
-    Ties broken by process id.
-    """
-    procs = sorted(
-        _deep_copy_processes(processes),
-        key=lambda p: (p["arrival_time"], p["id"]),
-    )
-
-    current_time   = 0
-    total_waiting  = 0.0
-    total_turnaround = 0.0
-    n = len(procs)
-
-    for p in procs:
-        # CPU may be idle if next process hasn't arrived yet
-        if current_time < p["arrival_time"]:
-            current_time = p["arrival_time"]
-
-        waiting_time     = current_time - p["arrival_time"]
-        current_time    += p["burst_time"]
-        turnaround_time  = current_time - p["arrival_time"]
-
-        total_waiting    += waiting_time
-        total_turnaround += turnaround_time
-
-    total_time = current_time  # time when last process finishes
-
-    return {
-        "avg_waiting_time"    : total_waiting    / n,
-        "avg_turnaround_time" : total_turnaround / n,
-        "throughput"          : n / total_time if total_time > 0 else 0.0,
-    }
+def _clone_processes(processes: List[Process]) -> List[Process]:
+    return [
+        {
+            "id": int(p["id"]),
+            "arrival_time": int(p["arrival_time"]),
+            "burst_time": int(p["burst_time"]),
+            "remaining_time": int(p["remaining_time"]),
+            "priority": int(p["priority"]),
+        }
+        for p in processes
+    ]
 
 
-# ------------------------------------------------------------------
-# 2. SJF — Shortest Job First (non-preemptive)
-# ------------------------------------------------------------------
-
-def sjf(processes: List[Dict]) -> Dict:
-    """
-    Shortest Job First scheduling (non-preemptive).
-    At each scheduling decision, the arrived process with the
-    shortest burst_time is chosen. Ties broken by arrival_time, then id.
-    """
-    procs        = _deep_copy_processes(processes)
-    remaining    = list(procs)           # processes not yet started
-    current_time = 0
-    completed    = 0
-    n            = len(procs)
-
-    total_waiting    = 0.0
-    total_turnaround = 0.0
-
-    while completed < n:
-        # Collect all processes that have arrived
-        available = [p for p in remaining if p["arrival_time"] <= current_time]
-
-        if not available:
-            # CPU idle — jump to the next arrival
-            next_arrival = min(p["arrival_time"] for p in remaining)
-            current_time = next_arrival
-            continue
-
-        # Pick shortest burst; tie-break on arrival_time then id
-        chosen = min(
-            available,
-            key=lambda p: (p["burst_time"], p["arrival_time"], p["id"]),
+def _build_result(name: str, original: List[Process], completion_times: Dict[int, int]) -> Dict:
+    rows = []
+    for p in sorted(original, key=lambda x: x["id"]):
+        ct = completion_times[p["id"]]
+        tat = ct - p["arrival_time"]
+        wt = tat - p["burst_time"]
+        rows.append(
+            {
+                "id": p["id"],
+                "arrival_time": p["arrival_time"],
+                "burst_time": p["burst_time"],
+                "priority": p["priority"],
+                "completion_time": ct,
+                "turnaround_time": tat,
+                "waiting_time": wt,
+            }
         )
 
-        waiting_time     = current_time - chosen["arrival_time"]
-        current_time    += chosen["burst_time"]
-        turnaround_time  = current_time - chosen["arrival_time"]
+    df = pd.DataFrame(rows)
+    makespan = int(df["completion_time"].max()) if not df.empty else 1
+    total_burst = int(df["burst_time"].sum()) if not df.empty else 0
 
-        total_waiting    += waiting_time
-        total_turnaround += turnaround_time
-
-        remaining.remove(chosen)
-        completed += 1
-
-    total_time = current_time
+    avg_wait = float(df["waiting_time"].mean()) if not df.empty else 0.0
+    avg_tat = float(df["turnaround_time"].mean()) if not df.empty else 0.0
+    throughput = float(len(df) / makespan) if makespan > 0 else 0.0
+    cpu_utilization = float(total_burst / makespan) if makespan > 0 else 0.0
 
     return {
-        "avg_waiting_time"    : total_waiting    / n,
-        "avg_turnaround_time" : total_turnaround / n,
-        "throughput"          : n / total_time if total_time > 0 else 0.0,
+        "scheduler": name,
+        "per_process": df,
+        "avg_waiting_time": avg_wait,
+        "avg_turnaround_time": avg_tat,
+        "throughput": throughput,
+        "cpu_utilization": cpu_utilization,
+        "starvation_count": 0.0,
+        "fairness_index": 1.0 / (1.0 + (df["waiting_time"].max() - df["waiting_time"].min())) if not df.empty else 1.0,
+        "completion_ratio": 1.0,
+        "makespan": makespan,
     }
 
 
-# ------------------------------------------------------------------
-# 3. Round Robin (quantum = 4, preemptive)
-# ------------------------------------------------------------------
+def fcfs_scheduler(processes: List[Process]) -> Dict:
+    procs = _clone_processes(processes)
+    original = _clone_processes(processes)
 
-def round_robin(processes: List[Dict], quantum: int = 4) -> Dict:
-    """
-    Round Robin scheduling with configurable time quantum (default = 4).
-    Preemptive: each process runs for at most `quantum` units per turn.
-    Processes are enqueued in arrival order; a process that is
-    preempted re-enters at the back of the ready queue.
-    """
-    procs        = sorted(
-        _deep_copy_processes(processes),
-        key=lambda p: (p["arrival_time"], p["id"]),
-    )
+    time = 0
+    completion_times: Dict[int, int] = {}
 
-    n            = len(procs)
-    current_time = 0
-    queue        = []           # ready queue  (indices into procs)
-    enqueued     = [False] * n  # track who has been added to queue
-    pointer      = 0            # index into sorted procs for arrivals
+    for p in sorted(procs, key=lambda x: (x["arrival_time"], x["id"])):
+        if time < p["arrival_time"]:
+            time = p["arrival_time"]
+        time += p["burst_time"]
+        completion_times[p["id"]] = time
 
-    total_waiting    = 0.0
-    total_turnaround = 0.0
-    completed        = 0
+    return _build_result("FCFS", original, completion_times)
 
-    # Enqueue all processes that arrive at time 0
-    while pointer < n and procs[pointer]["arrival_time"] <= current_time:
-        queue.append(pointer)
-        enqueued[pointer] = True
-        pointer += 1
+
+def sjf_scheduler(processes: List[Process]) -> Dict:
+    procs = _clone_processes(processes)
+    original = _clone_processes(processes)
+
+    time = 0
+    completed = 0
+    n = len(procs)
+    done = set()
+    completion_times: Dict[int, int] = {}
 
     while completed < n:
-        if not queue:
-            # CPU idle — advance to next arrival
-            if pointer < n:
-                current_time = procs[pointer]["arrival_time"]
-                while pointer < n and procs[pointer]["arrival_time"] <= current_time:
-                    queue.append(pointer)
-                    enqueued[pointer] = True
-                    pointer += 1
+        available = [p for p in procs if p["arrival_time"] <= time and p["id"] not in done]
+        if not available:
+            time += 1
             continue
 
-        idx     = queue.pop(0)
-        process = procs[idx]
+        current = min(available, key=lambda x: (x["burst_time"], x["arrival_time"], x["id"]))
+        time += current["burst_time"]
+        completion_times[current["id"]] = time
+        done.add(current["id"])
+        completed += 1
 
-        # How long does this process run this slice?
-        run_time     = min(quantum, process["remaining_time"])
-        process["remaining_time"] -= run_time
-        current_time += run_time
+    return _build_result("SJF", original, completion_times)
 
-        # Enqueue any processes that arrived during this slice
-        while pointer < n and procs[pointer]["arrival_time"] <= current_time:
-            queue.append(pointer)
-            enqueued[pointer] = True
-            pointer += 1
 
-        if process["remaining_time"] == 0:
-            # Process finished
-            turnaround_time  = current_time - process["arrival_time"]
-            waiting_time     = turnaround_time - process["burst_time"]
-            waiting_time     = max(waiting_time, 0)
+def round_robin_scheduler(processes: List[Process], quantum: int = 4) -> Dict:
+    procs = _clone_processes(processes)
+    original = _clone_processes(processes)
 
-            total_turnaround += turnaround_time
-            total_waiting    += waiting_time
-            completed        += 1
+    time = 0
+    completed = 0
+    n = len(procs)
+    arrival_index = 0
+    ready_queue: List[Process] = []
+    remaining = {p["id"]: p["remaining_time"] for p in procs}
+    completion_times: Dict[int, int] = {}
+
+    procs.sort(key=lambda x: (x["arrival_time"], x["id"]))
+
+    while completed < n:
+        while arrival_index < n and procs[arrival_index]["arrival_time"] <= time:
+            ready_queue.append(procs[arrival_index])
+            arrival_index += 1
+
+        if not ready_queue:
+            if arrival_index < n:
+                time = max(time, procs[arrival_index]["arrival_time"])
+                continue
+            break
+
+        current = ready_queue.pop(0)
+        pid = current["id"]
+        run_time = min(quantum, remaining[pid])
+
+        remaining[pid] -= run_time
+        time += run_time
+
+        while arrival_index < n and procs[arrival_index]["arrival_time"] <= time:
+            ready_queue.append(procs[arrival_index])
+            arrival_index += 1
+
+        if remaining[pid] > 0:
+            ready_queue.append(current)
         else:
-            # Preempted — re-enter at back of queue
-            queue.append(idx)
+            completion_times[pid] = time
+            completed += 1
 
-    total_time = current_time
-
-    return {
-        "avg_waiting_time"    : total_waiting    / n,
-        "avg_turnaround_time" : total_turnaround / n,
-        "throughput"          : n / total_time if total_time > 0 else 0.0,
-    }
+    return _build_result("Round Robin", original, completion_times)
