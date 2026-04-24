@@ -91,7 +91,7 @@
 
   /* ── METRIC CARDS ── */
   .metrics-grid {
-    display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 28px;
+    display: grid; grid-template-columns: repeat(5,1fr); gap: 14px; margin-bottom: 28px;
   }
   .metric-card {
     background: var(--panel); border: 1px solid var(--border);
@@ -620,7 +620,7 @@ function renderRewardCurve() {
 function renderResultsTable() {
   const tbody = document.getElementById('results-tbody');
   const algos = allAlgos();
-  const rankColors = { 1: 'var(--green)', 2: 'var(--purple)', 3: 'var(--cyan)', 4: 'var(--red)' };
+  const rankColors = { 1: 'var(--green)', 2: 'var(--purple)', 3: 'var(--cyan)', 4: 'var(--red)', 5: 'var(--orange)' };
 
   const sorted = Object.entries(algos).sort((a,b) =>
     a[1].avg_waiting_time - b[1].avg_waiting_time

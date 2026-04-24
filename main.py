@@ -383,8 +383,8 @@ def build_dashboard(
     with open(output, "w", encoding="utf-8") as f:
         f.write(html_out)
 
-    print(f"  [OK] Dashboard saved → {output}")
-    print(f"  → {os.path.abspath(output)}")
+    print(f"  [OK] Dashboard saved -> {output}")
+    print(f"  -> {os.path.abspath(output)}")
 
 
 if __name__ == "__main__":
