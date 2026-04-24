@@ -288,7 +288,6 @@ def plot_results(df: pd.DataFrame) -> None:
     plt.tight_layout()
     plt.savefig("adaptive_scheduling_comparison.png", dpi=150, bbox_inches="tight")
     print("\n[OK] Plot saved -> adaptive_scheduling_comparison.png")
-    plt.show()
 
 
 def build_dashboard(

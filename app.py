@@ -24,8 +24,8 @@ def index():
 def run_simulation():
     try:
         print("[INFO] Running CPU Scheduling Simulation...")
-        # Run the main.py script
-        process = subprocess.run(['python', 'main.py'], capture_output=True, text=True, check=True)
+        import sys
+        process = subprocess.run([sys.executable, 'main.py'], capture_output=True, text=True, check=True)
         print("[INFO] Simulation completed.")
         return send_file('dashboard_output.html')
     except subprocess.CalledProcessError as e:
