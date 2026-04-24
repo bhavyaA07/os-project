@@ -49,6 +49,11 @@ def _build_result(name: str, original: List[Process], completion_times: Dict[int
     throughput = float(len(df) / makespan) if makespan > 0 else 0.0
     cpu_utilization = float(total_burst / makespan) if makespan > 0 else 0.0
 
+    if not df.empty and df["waiting_time"].sum() > 0:
+        jains_fairness = float((df["waiting_time"].sum() ** 2) / (len(df) * (df["waiting_time"] ** 2).sum()))
+    else:
+        jains_fairness = 1.0
+
     return {
         "scheduler": name,
         "per_process": df,
@@ -57,7 +62,7 @@ def _build_result(name: str, original: List[Process], completion_times: Dict[int
         "throughput": throughput,
         "cpu_utilization": cpu_utilization,
         "starvation_count": 0.0,
-        "fairness_index": 1.0 / (1.0 + (df["waiting_time"].max() - df["waiting_time"].min())) if not df.empty else 1.0,
+        "fairness_index": jains_fairness,
         "completion_ratio": 1.0,
         "makespan": makespan,
     }
@@ -147,3 +152,32 @@ def round_robin_scheduler(processes: List[Process], quantum: int = 4) -> Dict:
             completed += 1
 
     return _build_result("Round Robin", original, completion_times)
+
+
+def srtf_scheduler(processes: List[Process]) -> Dict:
+    procs = _clone_processes(processes)
+    original = _clone_processes(processes)
+
+    time = 0
+    completed = 0
+    n = len(procs)
+    remaining = {p["id"]: p["remaining_time"] for p in procs}
+    completion_times: Dict[int, int] = {}
+
+    while completed < n:
+        available = [p for p in procs if p["arrival_time"] <= time and remaining[p["id"]] > 0]
+        if not available:
+            time += 1
+            continue
+
+        current = min(available, key=lambda x: (remaining[x["id"]], x["arrival_time"], x["id"]))
+        pid = current["id"]
+
+        remaining[pid] -= 1
+        time += 1
+
+        if remaining[pid] == 0:
+            completion_times[pid] = time
+            completed += 1
+
+    return _build_result("SRTF", original, completion_times)

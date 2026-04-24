@@ -75,7 +75,7 @@ class CPUSchedulingEnv(gym.Env):
             p for p in self.processes
             if p["arrival_time"] <= self.current_time and p["remaining_time"] > 0
         ]
-        self.ready_queue.sort(key=lambda x: (x["arrival_time"], x["id"]))
+        self.ready_queue.sort(key=lambda x: (x["remaining_time"], x["arrival_time"], x["id"]))
 
     def _all_done(self) -> bool:
         return all(p["remaining_time"] == 0 for p in self.processes)
@@ -162,7 +162,7 @@ class CPUSchedulingEnv(gym.Env):
 
         if self.last_pid is not None and self.last_pid != current["id"]:
             self.context_switches += 1
-            reward -= 0.03
+            reward -= 0.5
 
         self.last_pid = current["id"]
 
@@ -206,17 +206,14 @@ class CPUSchedulingEnv(gym.Env):
         after_max_wait = float(np.max(after_waits)) if after_waits else 0.0
         starvation_count = sum(1 for w in after_waits if w >= self.starvation_threshold)
 
-        reward += 0.5 * used_cpu
-        reward -= 0.01 * after_avg_wait
-        reward -= 0.008 * after_max_wait
+        # Research-oriented reward: heavily penalize total waiting time to minimize average wait time
+        total_waiting_time = sum(after_waits)
+        reward -= 0.1 * total_waiting_time
+        reward += 0.1 * used_cpu
         reward -= 0.05 * starvation_count
-        reward -= 0.02 * max(0.0, after_avg_wait - before_avg_wait)
 
         if completed_now:
-            reward += 10.0
-
-        if after_max_wait < before_max_wait:
-            reward += 0.25
+            reward += 5.0
 
         if self._all_done():
             terminated = True

@@ -1,0 +1,17 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Outputs
+outputs/
+*.png
+dashboard_output.html
+scheduler_comparison.csv
+
+# Secrets (DO NOT COMMIT!)
+github_pat_*

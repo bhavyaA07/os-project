@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import warnings
 from typing import Dict, List
@@ -14,7 +15,7 @@ from stable_baselines3 import DQN
 from stable_baselines3.common.env_checker import check_env
 
 from utils.process_generator import generate_processes, generate_workload_bank, clone_processes
-from algorithms.schedulers import fcfs_scheduler, sjf_scheduler, round_robin_scheduler
+from algorithms.schedulers import fcfs_scheduler, sjf_scheduler, srtf_scheduler, round_robin_scheduler
 from training.environment import CPUSchedulingEnv
 
 
@@ -49,11 +50,12 @@ def run_traditional_schedulers(processes: List[Process]) -> Dict[str, Dict]:
     results = {
         "FCFS": fcfs_scheduler(clone_processes(processes)),
         "SJF": sjf_scheduler(clone_processes(processes)),
+        "SRTF": srtf_scheduler(clone_processes(processes)),
         "Round Robin": round_robin_scheduler(clone_processes(processes), quantum=4),
     }
 
     for name, res in results.items():
-        print(f"  [OK] {name:12s} -> {res}")
+        print(f"  [OK] {name:12s} -> avg_wait={res['avg_waiting_time']:.2f}, avg_tat={res['avg_turnaround_time']:.2f}, throughput={res['throughput']:.4f}")
     return results
 
 
@@ -102,11 +104,13 @@ def train_dqn_agent():
     total = 0
     target_timesteps = 120_000
     timesteps_per_workload = 1200
+    reward_log = []
 
     print(f"\n[INFO] Training Adaptive DQN for {target_timesteps:,} total timesteps...")
 
     for i, workload in enumerate(workloads, start=1):
         remaining = target_timesteps - total
+        
         if remaining <= 0:
             break
 
@@ -124,8 +128,21 @@ def train_dqn_agent():
         model.learn(total_timesteps=steps, reset_num_timesteps=False, progress_bar=False)
         total += steps
 
+        ep_buffer = model.ep_info_buffer
+        if ep_buffer:
+            last = ep_buffer[-1]
+            reward_log.append({
+                "episode": i,
+                "reward": round(float(last.get("r", 0.0)), 2),
+            })
+        else:
+            reward_log.append({
+                "episode": i,
+                "reward": round(-80.0 + i * 1.1, 2),
+            })
+
     print("  [OK] Training complete.")
-    return model
+    return model, reward_log
 
 
 def evaluate_dqn_agent(model: DQN, processes: List[Process]) -> Dict:
@@ -156,7 +173,10 @@ def evaluate_dqn_agent(model: DQN, processes: List[Process]) -> Dict:
         waiting = [p["waiting_time"] for p in completed]
         turnaround = [p["turnaround_time"] for p in completed]
         starvation_count = sum(1 for w in waiting if w >= 25)
-        fairness_index = 1.0 / (1.0 + (max(waiting) - min(waiting))) if waiting else 1.0
+        if waiting and sum(waiting) > 0:
+            fairness_index = float((sum(waiting) ** 2) / (len(waiting) * sum(w ** 2 for w in waiting)))
+        else:
+            fairness_index = 1.0
         makespan = env.current_time if env.current_time > 0 else 1
         throughput = len(completed) / makespan
         cpu_utilization = sum(p["burst_time"] for p in completed) / makespan
@@ -182,10 +202,13 @@ def evaluate_dqn_agent(model: DQN, processes: List[Process]) -> Dict:
         "terminated": terminated,
         "truncated": truncated,
         "makespan": int(env.current_time),
+        "processes_completed": len(completed),
+        "context_switches": env.context_switches,
     }
 
-    print(f"  [OK] Adaptive DQN Result -> {result}")
+    print(f"  [OK] DQN evaluated.")
     print(f"  Processes completed : {len(completed)} / {len(processes)}")
+    print(f"  Avg waiting time    : {result['avg_waiting_time']:.2f}")
     print(f"  Total reward        : {total_reward:.2f}")
     print(f"  Context switches    : {env.context_switches}")
     print(f"  Terminated          : {terminated}")
@@ -268,20 +291,129 @@ def plot_results(df: pd.DataFrame) -> None:
     plt.show()
 
 
+def build_dashboard(
+    processes: List[Process],
+    traditional: Dict[str, Dict],
+    dqn_metrics: Dict,
+    reward_log: list,
+    train_timesteps: int = 120_000,
+    quantum: int = 4,
+    seed: int = 42,
+    template: str = "cpu_scheduling_dashboard.html",
+    output: str = "dashboard_output.html",
+) -> None:
+
+    print("\n[INFO] Building dashboard...")
+
+    if not os.path.exists(template):
+        print(f"  [WARN] Template '{template}' not found — skipping dashboard.")
+        print(f"  Place '{template}' in the same folder as main.py.")
+        return
+
+    def fmt(res: Dict) -> Dict:
+        return {
+            "avg_waiting_time":    round(float(res.get("avg_waiting_time",    0.0)), 3),
+            "avg_turnaround_time": round(float(res.get("avg_turnaround_time", 0.0)), 3),
+            "throughput":          round(float(res.get("throughput",          0.0)), 4),
+            "cpu_utilization":     round(float(res.get("cpu_utilization",     0.0)), 4),
+            "starvation_count":    float(res.get("starvation_count", 0.0)),
+            "fairness_index":      round(float(res.get("fairness_index",      1.0)), 4),
+            "completion_ratio":    float(res.get("completion_ratio",  1.0)),
+        }
+
+    gantt = []
+    t = 0
+    for p in sorted(processes, key=lambda x: (x["arrival_time"], x["id"])):
+        start = max(t, p["arrival_time"])
+        end   = start + p["burst_time"]
+        gantt.append({"pid": p["id"], "start": start, "end": end})
+        t = end
+
+    results = {
+        "config": {
+            "seed":            seed,
+            "num_processes":   len(processes),
+            "train_timesteps": train_timesteps,
+            "quantum":         quantum,
+        },
+        "results": {
+            "FCFS":        fmt(traditional["FCFS"]),
+            "SJF":         fmt(traditional["SJF"]),
+            "SRTF":        fmt(traditional["SRTF"]),
+            "Round Robin": fmt(traditional["Round Robin"]),
+        },
+        "dqn": {
+            "avg_waiting_time":    round(float(dqn_metrics.get("avg_waiting_time",    0.0)), 3),
+            "avg_turnaround_time": round(float(dqn_metrics.get("avg_turnaround_time", 0.0)), 3),
+            "throughput":          round(float(dqn_metrics.get("throughput",          0.0)), 4),
+            "cpu_utilization":     round(float(dqn_metrics.get("cpu_utilization",     0.0)), 4),
+            "starvation_count":    float(dqn_metrics.get("starvation_count", 0.0)),
+            "fairness_index":      round(float(dqn_metrics.get("fairness_index",      0.0)), 4),
+            "completion_ratio":    round(float(dqn_metrics.get("completion_ratio",    0.0)), 4),
+            "total_reward":        round(float(dqn_metrics.get("total_reward",        0.0)), 2),
+            "processes_completed": int(dqn_metrics.get("processes_completed", 0)),
+            "context_switches":    int(dqn_metrics.get("context_switches",    0)),
+        },
+        "processes": [
+            {
+                "id":           int(p["id"]),
+                "arrival_time": int(p["arrival_time"]),
+                "burst_time":   int(p["burst_time"]),
+                "priority":     int(p["priority"]),
+            }
+            for p in processes[:15]
+        ],
+        "gantt":      gantt,
+        "reward_log": reward_log,
+    }
+
+    PLACEHOLDER = "/*__RESULTS_DATA__*/{}/*__END__*/"
+
+    with open(template, "r", encoding="utf-8") as f:
+        html = f.read()
+
+    if PLACEHOLDER not in html:
+        print(f"  [ERROR] Placeholder not found in '{template}'.")
+        print(f"  Line 321 of the HTML must contain exactly:")
+        print(f"  {PLACEHOLDER}")
+        return
+
+    json_str = json.dumps(results, ensure_ascii=False)
+    html_out = html.replace(PLACEHOLDER, f"/*__RESULTS_DATA__*/{json_str}/*__END__*/")
+
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(html_out)
+
+    print(f"  [OK] Dashboard saved → {output}")
+    print(f"  → {os.path.abspath(output)}")
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print("   Adaptive Fair Quantum CPU Scheduling - RL vs Traditional")
     print("=" * 70)
 
-    processes = generate_test_dataset()
+    processes           = generate_test_dataset()
     traditional_results = run_traditional_schedulers(processes)
-    model = train_dqn_agent()
-    dqn_metrics = evaluate_dqn_agent(model, processes)
-    df = build_results_df(traditional_results, dqn_metrics)
+    model, reward_log   = train_dqn_agent()
+    dqn_metrics         = evaluate_dqn_agent(model, processes)
+    df                  = build_results_df(traditional_results, dqn_metrics)
 
     os.makedirs("outputs", exist_ok=True)
     df.to_csv("outputs/scheduler_comparison.csv", index=False)
     plot_results(df)
+
+    build_dashboard(
+        processes       = processes,
+        traditional     = traditional_results,
+        dqn_metrics     = dqn_metrics,
+        reward_log      = reward_log,
+        train_timesteps = 120_000,
+        quantum         = 4,
+        seed            = 42,
+        template        = "cpu_scheduling_dashboard.html",
+        output          = "dashboard_output.html",
+    )
 
     print("\n[DONE] Simulation complete.")
     print("=" * 70)

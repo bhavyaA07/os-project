@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CPU Scheduling RL Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #050810;
+    --bg2:      #080d1a;
+    --panel:    #0c1428;
+    --border:   #1a2a4a;
+    --cyan:     #00d4ff;
+    --green:    #00ff88;
+    --orange:   #ff8c00;
+    --red:      #ff3366;
+    --purple:   #9b59ff;
+    --text:     #c8d8f0;
+    --dim:      #4a6080;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 500;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.025) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none; z-index: 9999;
+  }
+
+  /* ── HEADER ── */
+  header {
+    position: relative; z-index: 10;
+    padding: 24px 40px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(180deg, rgba(0,212,255,0.05) 0%, transparent 100%);
+  }
+  .logo-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px; font-weight: 900; letter-spacing: 3px;
+    color: var(--cyan); text-shadow: 0 0 20px rgba(0,212,255,0.5);
+  }
+  .logo-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; color: var(--dim); letter-spacing: 4px; margin-top: 3px;
+  }
+  .header-right {
+    display: flex; gap: 20px; align-items: center;
+    font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 2px; color: var(--dim);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; display: inline-block; margin-right: 6px; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.85)} }
+
+  /* ── LAYOUT ── */
+  main { position: relative; z-index: 10; padding: 28px 40px; max-width: 1600px; margin: 0 auto; }
+
+  .sec-label {
+    font-family: 'Share Tech Mono', monospace; font-size: 10px;
+    letter-spacing: 4px; color: var(--cyan); text-transform: uppercase;
+    margin-bottom: 14px; display: flex; align-items: center; gap: 12px;
+  }
+  .sec-label::after { content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent); }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; padding: 22px;
+  }
+
+  /* ── METRIC CARDS ── */
+  .metrics-grid {
+    display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 28px;
+  }
+  .metric-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; padding: 18px 20px; position: relative; overflow: hidden;
+    transition: border-color .3s, transform .3s; cursor: default;
+  }
+  .metric-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--ac); box-shadow: 0 0 12px var(--ac);
+  }
+  .metric-card:hover { border-color: var(--ac); transform: translateY(-2px); }
+  .mc-tag {
+    font-family: 'Share Tech Mono', monospace; font-size: 10px;
+    letter-spacing: 3px; color: var(--ac); margin-bottom: 8px;
+  }
+  .mc-num {
+    font-family: 'Orbitron', sans-serif; font-size: 34px;
+    font-weight: 700; color: #fff; line-height: 1; margin-bottom: 4px;
+  }
+  .mc-lbl { font-size: 11px; color: var(--dim); letter-spacing: 1px; }
+  .mc-badge {
+    position: absolute; top: 14px; right: 14px;
+    font-family: 'Share Tech Mono', monospace; font-size: 9px; letter-spacing: 2px;
+    padding: 3px 8px; border-radius: 2px;
+    background: rgba(0,255,136,0.1); color: var(--green); border: 1px solid rgba(0,255,136,0.3);
+  }
+
+  /* ── TWO COL ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px; }
+
+  /* ── PROCESS TABLE ── */
+  .ptable { width: 100%; border-collapse: collapse;
+    font-family: 'Share Tech Mono', monospace; font-size: 12px; }
+  .ptable th { text-align: left; padding: 7px 10px; color: var(--dim);
+    letter-spacing: 2px; font-size: 10px; border-bottom: 1px solid var(--border); }
+  .ptable td { padding: 8px 10px; border-bottom: 1px solid rgba(26,42,74,.4); color: var(--text); transition: background .2s; }
+  .ptable tr:hover td { background: rgba(0,212,255,.03); }
+  .prio-bar { display: inline-block; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+
+  /* ── GANTT ── */
+  .gantt-scroll { overflow-x: auto; padding-bottom: 6px; }
+  .gantt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .gantt-pid { font-family: 'Share Tech Mono', monospace; font-size: 11px; width: 44px; flex-shrink: 0; }
+  .gantt-track { flex: 1; height: 26px; background: rgba(255,255,255,.02);
+    border: 1px solid var(--border); border-radius: 2px; position: relative; }
+  .gantt-block {
+    position: absolute; top: 3px; bottom: 3px; border-radius: 2px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Share Tech Mono', monospace; font-size: 9px; color: rgba(0,0,0,.8); font-weight: bold;
+    animation: gfade .5s ease forwards; opacity: 0;
+  }
+  @keyframes gfade { to { opacity: 1; } }
+  .gantt-axis { display: flex; margin-left: 52px; border-top: 1px solid var(--border); padding-top: 3px; margin-top: 2px; }
+  .gantt-tick { font-family: 'Share Tech Mono', monospace; font-size: 9px; color: var(--dim); flex: 1; }
+
+  /* ── BAR CHARTS ── */
+  .compare-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+  .compare-col h4 {
+    font-family: 'Share Tech Mono', monospace; font-size: 10px;
+    letter-spacing: 3px; color: var(--dim); margin-bottom: 14px; text-transform: uppercase;
+  }
+  .chart-wrap { display: flex; flex-direction: column; gap: 12px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; }
+  .bar-lbl { font-family: 'Share Tech Mono', monospace; font-size: 10px; width: 88px; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 22px; background: rgba(255,255,255,.03);
+    border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
+  .bar-fill {
+    height: 100%; border-radius: 2px; display: flex; align-items: center;
+    padding-left: 8px; font-family: 'Share Tech Mono', monospace; font-size: 10px;
+    color: rgba(255,255,255,.9); transition: width 1.3s cubic-bezier(.16,1,.3,1); width: 0;
+  }
+  .b-cyan   { background: linear-gradient(90deg,rgba(0,212,255,.7),rgba(0,212,255,.35)); }
+  .b-green  { background: linear-gradient(90deg,rgba(0,255,136,.7),rgba(0,255,136,.35)); }
+  .b-orange { background: linear-gradient(90deg,rgba(255,140,0,.7),rgba(255,140,0,.35)); }
+  .b-purple { background: linear-gradient(90deg,rgba(155,89,255,.7),rgba(155,89,255,.35)); }
+  .b-red    { background: linear-gradient(90deg,rgba(255,51,102,.7),rgba(255,51,102,.35)); }
+
+  /* ── TRAINING STATS ── */
+  .train-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 18px; }
+  .train-stat { background: rgba(0,0,0,.3); border: 1px solid var(--border);
+    border-radius: 3px; padding: 14px; text-align: center; }
+  .ts-val { font-family: 'Orbitron', sans-serif; font-size: 22px; font-weight: 700; }
+  .ts-lbl { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--dim); letter-spacing: 2px; margin-top: 3px; }
+
+  /* ── RESULTS TABLE ── */
+  .rtable { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .rtable th { text-align: left; padding: 9px 14px; color: var(--dim);
+    letter-spacing: 2px; font-size: 10px; font-family: 'Share Tech Mono', monospace;
+    border-bottom: 1px solid var(--border); }
+  .rtable td { padding: 10px 14px; border-bottom: 1px solid rgba(26,42,74,.4); transition: background .2s; }
+  .rtable tr:hover td { background: rgba(0,212,255,.03); }
+
+  /* ── WINNER ROW ── */
+  .winner-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 28px; }
+  .winner-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; padding: 16px 18px;
+    display: flex; align-items: center; gap: 14px; position: relative; overflow: hidden;
+  }
+  .winner-card::before {
+    content: ''; position: absolute; top: 0; left: 0; bottom: 0;
+    width: 3px; background: var(--ac); box-shadow: 0 0 10px var(--ac);
+  }
+  .wi-icon { font-size: 26px; flex-shrink: 0; }
+  .wi-lbl { font-size: 10px; color: var(--dim); letter-spacing: 3px;
+    font-family: 'Share Tech Mono', monospace; margin-bottom: 3px; }
+  .wi-val { font-family: 'Orbitron', sans-serif; font-size: 15px; font-weight: 700; color: #fff; }
+  .wi-algo { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--ac); margin-top: 2px; }
+
+  /* ── REWARD CURVE ── */
+  #reward-svg { width: 100%; height: 90px; display: block;
+    border: 1px solid var(--border); border-radius: 3px; background: rgba(0,0,0,.3); }
+
+  /* ── FADE UP ── */
+  .fu { opacity: 0; transform: translateY(14px); animation: fu .55s ease forwards; }
+  @keyframes fu { to { opacity:1; transform:translateY(0); } }
+  .d1{animation-delay:.08s} .d2{animation-delay:.16s} .d3{animation-delay:.24s}
+  .d4{animation-delay:.32s} .d5{animation-delay:.40s} .d6{animation-delay:.48s}
+
+  /* ── NO DATA ── */
+  #no-data-banner {
+    display: none; position: fixed; inset: 0; z-index: 10000;
+    background: rgba(5,8,16,.95); align-items: center; justify-content: center;
+    flex-direction: column; gap: 20px; text-align: center;
+  }
+  #no-data-banner h2 { font-family: 'Orbitron', sans-serif; color: var(--red); font-size: 20px; }
+  #no-data-banner p  { font-family: 'Share Tech Mono', monospace; color: var(--dim); font-size: 12px; line-height: 2; }
+  code { background: var(--panel); padding: 2px 8px; border-radius: 3px; color: var(--cyan); }
+
+  footer {
+    position: relative; z-index: 10; border-top: 1px solid var(--border);
+    padding: 14px 40px; display: flex; justify-content: space-between;
+    font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--dim); letter-spacing: 2px;
+  }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: var(--bg2); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- NO DATA BANNER (shown if JSON not injected) -->
+<div id="no-data-banner">
+  <h2>⚠ NO RESULTS DATA FOUND</h2>
+  <p>
+    Run <code>python3 main.py</code> first to generate results,<br>
+    then serve with:<br><br>
+    <code>python3 -m http.server 8080</code><br><br>
+    and open <code>http://localhost:8080/cpu_scheduling_dashboard.html</code>
+  </p>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div>
+    <div class="logo-title">SCHED//RL</div>
+    <div class="logo-sub">CPU SCHEDULING · REINFORCEMENT LEARNING · LIVE DASHBOARD</div>
+  </div>
+  <div class="header-right">
+    <span><span class="dot"></span>LIVE DATA</span>
+    <span id="hdr-config">SEED: — &nbsp;|&nbsp; PROCESSES: — &nbsp;|&nbsp; TIMESTEPS: —</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- METRIC CARDS -->
+  <div class="sec-label fu d1">ALGORITHM PERFORMANCE · AVG WAITING TIME</div>
+  <div class="metrics-grid fu d1" id="metric-cards"></div>
+
+  <!-- WINNER CARDS -->
+  <div class="winner-row fu d2" id="winner-row"></div>
+
+  <!-- COMPARISON BARS -->
+  <div class="sec-label fu d3">COMPARATIVE ANALYSIS</div>
+  <div class="panel fu d3" style="margin-bottom:28px">
+    <div class="compare-grid" id="compare-grid"></div>
+  </div>
+
+  <!-- PROCESS TABLE + GANTT -->
+  <div class="two-col fu d4">
+    <div class="panel">
+      <div class="sec-label" style="margin-bottom:14px">PROCESS DATASET</div>
+      <table class="ptable"><thead><tr>
+        <th>PID</th><th>ARRIVAL</th><th>BURST</th><th>PRIORITY</th>
+      </tr></thead><tbody id="proc-tbody"></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="sec-label" style="margin-bottom:14px">FCFS GANTT CHART</div>
+      <div class="gantt-scroll"><div id="gantt-wrap"></div></div>
+    </div>
+  </div>
+
+  <!-- DQN TRAINING MONITOR -->
+  <div class="sec-label fu d5">DQN TRAINING MONITOR</div>
+  <div class="panel fu d5" style="margin-bottom:28px">
+    <div class="train-grid" id="train-grid"></div>
+    <div class="sec-label" style="font-size:10px;margin-bottom:6px;margin-top:4px">EPISODE REWARD HISTORY</div>
+    <svg id="reward-svg" viewBox="0 0 800 90" preserveAspectRatio="none"></svg>
+  </div>
+
+  <!-- FINAL RESULTS TABLE -->
+  <div class="sec-label fu d6">FINAL RESULTS · ALL ALGORITHMS</div>
+  <div class="panel fu d6">
+    <table class="rtable">
+      <thead><tr>
+        <th>ALGORITHM</th>
+        <th>AVG WAITING TIME</th>
+        <th>AVG TURNAROUND TIME</th>
+        <th>THROUGHPUT</th>
+        <th>RANK</th>
+      </tr></thead>
+      <tbody id="results-tbody"></tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  <span>CPU SCHEDULING SIMULATION · STABLE-BASELINES3 DQN · GYMNASIUM</span>
+  <span id="footer-info">PYTHON 3.x · SEED: —</span>
+</footer>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+// LIVE DATA — injected by main.py
+// ─────────────────────────────────────────────────────────────────
+const RESULTS = /*__RESULTS_DATA__*/{}/*__END__*/;
+
+// ─────────────────────────────────────────────────────────────────
+// Palette
+// ─────────────────────────────────────────────────────────────────
+const ALGO_COLORS = {
+  'FCFS'        : { hex: '#00d4ff', cls: 'b-cyan',   css: 'var(--cyan)'   },
+  'SJF'         : { hex: '#00ff88', cls: 'b-green',  css: 'var(--green)'  },
+  'SRTF'        : { hex: '#ff3366', cls: 'b-red',    css: 'var(--red)'    },
+  'Round Robin' : { hex: '#ff8c00', cls: 'b-orange', css: 'var(--orange)' },
+  'DQN (RL)'    : { hex: '#9b59ff', cls: 'b-purple', css: 'var(--purple)' },
+};
+const P_COLORS = [
+  '#00d4ff','#00ff88','#ff8c00','#9b59ff','#ff3366',
+  '#00cfcf','#ffe066','#ff6b6b','#a8edea','#fed6e3'
+];
+
+// ─────────────────────────────────────────────────────────────────
+// Guard — no data
+// ─────────────────────────────────────────────────────────────────
+function isEmpty(obj) {
+  return !obj || Object.keys(obj).length === 0;
+}
+if (isEmpty(RESULTS) || !RESULTS.results) {
+  document.getElementById('no-data-banner').style.display = 'flex';
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────
+function allAlgos() {
+  const r = { ...RESULTS.results };
+  r['DQN (RL)'] = RESULTS.dqn;
+  return r;
+}
+
+function bestWT()  { return Object.entries(allAlgos()).reduce((b,e) => e[1].avg_waiting_time    < b[1].avg_waiting_time    ? e : b); }
+function bestTAT() { return Object.entries(allAlgos()).reduce((b,e) => e[1].avg_turnaround_time < b[1].avg_turnaround_time ? e : b); }
+
+// ─────────────────────────────────────────────────────────────────
+// Header config
+// ─────────────────────────────────────────────────────────────────
+function renderHeader() {
+  if (!RESULTS.config) return;
+  const c = RESULTS.config;
+  document.getElementById('hdr-config').textContent =
+    `SEED: ${c.seed}  |  PROCESSES: ${c.num_processes}  |  TIMESTEPS: ${c.train_timesteps.toLocaleString()}`;
+  document.getElementById('footer-info').textContent =
+    `PYTHON 3.x  ·  GYMNASIUM  ·  SEED: ${c.seed}  ·  Q: ${c.quantum}`;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Metric Cards
+// ─────────────────────────────────────────────────────────────────
+function renderMetricCards() {
+  const container = document.getElementById('metric-cards');
+  const algos = allAlgos();
+  const bestAlgo = bestWT()[0];
+
+  Object.entries(algos).forEach(([name, m]) => {
+    const col = ALGO_COLORS[name] || { hex: '#fff', css: '#fff' };
+    const isBest = name === bestAlgo;
+    const div = document.createElement('div');
+    div.className = 'metric-card';
+    div.style.setProperty('--ac', col.css);
+    div.innerHTML = `
+      ${isBest ? '<div class="mc-badge">BEST</div>' : ''}
+      <div class="mc-tag">${name}</div>
+      <div class="mc-num" style="color:${isBest ? col.hex : '#fff'}">${m.avg_waiting_time}</div>
+      <div class="mc-lbl">AVG WAITING TIME (units)</div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Winner Cards
+// ─────────────────────────────────────────────────────────────────
+function renderWinnerCards() {
+  const container = document.getElementById('winner-row');
+  const [bwtName, bwtM] = bestWT();
+  const [btatName, btatM] = bestTAT();
+
+  const dqn  = RESULTS.dqn;
+  const fcfs = RESULTS.results['FCFS'];
+  const improvement = fcfs
+    ? ((fcfs.avg_waiting_time - dqn.avg_waiting_time) / fcfs.avg_waiting_time * 100).toFixed(1)
+    : '—';
+
+  const cards = [
+    { icon: '⏱', lbl: 'BEST WAITING TIME',   val: `${bwtM.avg_waiting_time} units`,  algo: bwtName,  ac: ALGO_COLORS[bwtName]?.css  || 'var(--cyan)'   },
+    { icon: '🔄', lbl: 'BEST TURNAROUND',      val: `${btatM.avg_turnaround_time} units`, algo: btatName, ac: ALGO_COLORS[btatName]?.css || 'var(--cyan)'   },
+    { icon: '🤖', lbl: 'DQN vs FCFS IMPROVEMENT', val: `${improvement}% better`, algo: `RL AGENT · ${(RESULTS.config?.train_timesteps||0).toLocaleString()} STEPS`, ac: 'var(--purple)' },
+  ];
+
+  cards.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'winner-card';
+    div.style.setProperty('--ac', c.ac);
+    div.innerHTML = `
+      <div class="wi-icon">${c.icon}</div>
+      <div>
+        <div class="wi-lbl">${c.lbl}</div>
+        <div class="wi-val">${c.val}</div>
+        <div class="wi-algo" style="color:${c.ac}">${c.algo}</div>
+      </div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Comparison Bar Charts
+// ─────────────────────────────────────────────────────────────────
+function renderCompareBars() {
+  const container = document.getElementById('compare-grid');
+  const algos = allAlgos();
+
+  const metrics = [
+    { key: 'avg_waiting_time',    label: '▸ AVG WAITING TIME',    fmt: v => v.toFixed(1) },
+    { key: 'avg_turnaround_time', label: '▸ AVG TURNAROUND TIME', fmt: v => v.toFixed(1) },
+    { key: 'throughput',          label: '▸ THROUGHPUT',          fmt: v => v.toFixed(4) },
+  ];
+
+  metrics.forEach(metric => {
+    const vals = Object.values(algos).map(m => m[metric.key]);
+    const maxV = Math.max(...vals) || 1;
+
+    const col = document.createElement('div');
+    col.className = 'compare-col';
+    col.innerHTML = `<h4>${metric.label}</h4><div class="chart-wrap" id="cw-${metric.key}"></div>`;
+    container.appendChild(col);
+
+    const wrap = col.querySelector(`#cw-${metric.key}`);
+    Object.entries(algos).forEach(([name, m]) => {
+      const pct  = (m[metric.key] / maxV * 95).toFixed(1);
+      const acol = ALGO_COLORS[name] || { cls: 'b-cyan' };
+      const row  = document.createElement('div');
+      row.className = 'bar-row';
+      row.innerHTML = `
+        <div class="bar-lbl">${name.toUpperCase().replace(' ROBIN','<br>ROBIN')}</div>
+        <div class="bar-track">
+          <div class="bar-fill ${acol.cls}" data-pct="${pct}">${metric.fmt(m[metric.key])}</div>
+        </div>
+      `;
+      wrap.appendChild(row);
+    });
+  });
+
+  // Animate bars
+  setTimeout(() => {
+    document.querySelectorAll('.bar-fill').forEach((b, i) => {
+      setTimeout(() => { b.style.width = b.dataset.pct + '%'; }, i * 60);
+    });
+  }, 300);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Process Table
+// ─────────────────────────────────────────────────────────────────
+function renderProcessTable() {
+  const tbody = document.getElementById('proc-tbody');
+  (RESULTS.processes || []).forEach((p, i) => {
+    const c = P_COLORS[i % P_COLORS.length];
+    const pw = (p.priority / 5) * 36;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="color:${c};font-family:'Share Tech Mono',monospace">P${p.id}</td>
+      <td>${p.arrival_time}</td>
+      <td>${p.burst_time}</td>
+      <td>
+        <span class="prio-bar" style="width:${pw}px;background:${c}"></span>${p.priority}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Gantt Chart
+// ─────────────────────────────────────────────────────────────────
+function renderGantt() {
+  const wrap = document.getElementById('gantt-wrap');
+  const slots = RESULTS.gantt || [];
+  if (!slots.length) { wrap.innerHTML = '<p style="color:var(--dim);font-size:12px">No gantt data.</p>'; return; }
+
+  const total = Math.max(...slots.map(s => s.end)) || 1;
+
+  slots.forEach((s, i) => {
+    const c = P_COLORS[(s.pid - 1) % P_COLORS.length];
+    const pctL = (s.start / total * 100).toFixed(2);
+    const pctW = ((s.end - s.start) / total * 100).toFixed(2);
+    const row  = document.createElement('div');
+    row.className = 'gantt-row';
+    row.innerHTML = `
+      <div class="gantt-pid" style="color:${c}">P${s.pid}</div>
+      <div class="gantt-track">
+        <div class="gantt-block" style="left:${pctL}%;width:${pctW}%;background:${c};animation-delay:${i*0.07}s">
+          P${s.pid}
+        </div>
+      </div>
+    `;
+    wrap.appendChild(row);
+  });
+
+  // Axis
+  const axis = document.createElement('div');
+  axis.className = 'gantt-axis';
+  [0, 25, 50, 75, 100].forEach(pct => {
+    const t = document.createElement('div');
+    t.className = 'gantt-tick';
+    t.textContent = Math.round(pct / 100 * total);
+    axis.appendChild(t);
+  });
+  wrap.appendChild(axis);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Training Stats
+// ─────────────────────────────────────────────────────────────────
+function renderTrainingStats() {
+  const container = document.getElementById('train-grid');
+  const c   = RESULTS.config  || {};
+  const dqn = RESULTS.dqn     || {};
+  const rl  = RESULTS.reward_log || [];
+
+  const stats = [
+    { val: (c.train_timesteps||0).toLocaleString(), lbl: 'TOTAL TIMESTEPS', color: 'var(--cyan)'   },
+    { val: rl.length || '—',                        lbl: 'EPISODES LOGGED', color: 'var(--green)'  },
+    { val: dqn.total_reward || '—',                 lbl: 'EVAL REWARD',     color: 'var(--orange)' },
+    { val: dqn.processes_completed || '—',          lbl: 'PROCS COMPLETED', color: 'var(--purple)' },
+    { val: '0.001',                                 lbl: 'LEARNING RATE',   color: 'var(--cyan)'   },
+    { val: '0.05',                                  lbl: 'EXPLORE RATE',    color: 'var(--green)'  },
+  ];
+
+  stats.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'train-stat';
+    div.innerHTML = `
+      <div class="ts-val" style="color:${s.color}">${s.val}</div>
+      <div class="ts-lbl">${s.lbl}</div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Reward Curve
+// ─────────────────────────────────────────────────────────────────
+function renderRewardCurve() {
+  const svg = document.getElementById('reward-svg');
+  const log = RESULTS.reward_log || [];
+  if (log.length < 2) {
+    svg.innerHTML = '<text x="400" y="50" fill="#4a6080" font-family="Share Tech Mono" font-size="11" text-anchor="middle">No reward log data — ep_info_buffer was empty</text>';
+    return;
+  }
+
+  const rewards = log.map(e => e.reward);
+  const W = 800, H = 90;
+  const minR = Math.min(...rewards);
+  const maxR = Math.max(...rewards);
+  const range = maxR - minR || 1;
+
+  const pts = rewards.map((r, i) => {
+    const x = (i / (rewards.length - 1)) * W;
+    const y = H - 8 - ((r - minR) / range) * (H - 16);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+
+  const areaPath = `M0,${H} L${pts.join(' L')} L${W},${H} Z`;
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="rg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#9b59ff" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="#9b59ff" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${areaPath}" fill="url(#rg)"/>
+    <polyline id="rl" points="${pts.join(' ')}"
+      fill="none" stroke="#9b59ff" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="4" y="12" fill="#4a6080" font-family="Share Tech Mono" font-size="9">${maxR.toFixed(0)}</text>
+    <text x="4" y="${H-4}" fill="#4a6080" font-family="Share Tech Mono" font-size="9">${minR.toFixed(0)}</text>
+  `;
+
+  const line = svg.getElementById('rl');
+  try {
+    const len = line.getTotalLength();
+    line.style.strokeDasharray  = len;
+    line.style.strokeDashoffset = len;
+    line.style.transition = 'stroke-dashoffset 2s ease';
+    setTimeout(() => { line.style.strokeDashoffset = 0; }, 500);
+  } catch(e) {}
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Results Table
+// ─────────────────────────────────────────────────────────────────
+function renderResultsTable() {
+  const tbody = document.getElementById('results-tbody');
+  const algos = allAlgos();
+  const rankColors = { 1: 'var(--green)', 2: 'var(--purple)', 3: 'var(--cyan)', 4: 'var(--red)' };
+
+  const sorted = Object.entries(algos).sort((a,b) =>
+    a[1].avg_waiting_time - b[1].avg_waiting_time
+  );
+
+  sorted.forEach(([name, m], idx) => {
+    const rank = idx + 1;
+    const col  = ALGO_COLORS[name] || { hex: '#fff', css: '#fff' };
+    const rc   = rankColors[rank] || '#fff';
+    const star = rank === 1 ? ' ★' : '';
+    const tr   = document.createElement('tr');
+    if (rank === 1) tr.style.background = 'rgba(0,255,136,.04)';
+    if (name === 'DQN (RL)') tr.style.background = 'rgba(155,89,255,.04)';
+    tr.innerHTML = `
+      <td style="color:${col.css};font-family:'Orbitron',sans-serif;font-size:12px">${name}</td>
+      <td style="color:${rank===1?col.hex:'inherit'}">${m.avg_waiting_time}${star}</td>
+      <td style="color:${rank===1?col.hex:'inherit'}">${m.avg_turnaround_time}${star}</td>
+      <td>${m.throughput}</td>
+      <td style="color:${rc};font-family:'Share Tech Mono',monospace">#${rank}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────────────────────
+if (!isEmpty(RESULTS) && RESULTS.results) {
+  renderHeader();
+  renderMetricCards();
+  renderWinnerCards();
+  renderCompareBars();
+  renderProcessTable();
+  renderGantt();
+  renderTrainingStats();
+  renderRewardCurve();
+  renderResultsTable();
+}
+</script>
+</body>
+</html>
